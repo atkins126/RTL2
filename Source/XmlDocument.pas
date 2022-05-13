@@ -179,6 +179,7 @@ type
     method RemoveAttribute(aName: not nullable String; aNamespace: nullable XmlNamespace := nil): nullable XmlAttribute;
 
     method &Add(aData: not nullable sequence of Object);
+    method &Add(aData: not nullable sequence of XmlElement);
     method &Add(aElement: not nullable XmlElement);
     method &Add(aCData: not nullable XmlCData);
     method &Add(aComment: not nullable XmlComment);
@@ -374,7 +375,7 @@ end;
 class method XmlDocument.FromFile(aFileName: not nullable File): not nullable XmlDocument;
 begin
   if not aFileName.Exists then
-    raise new FileNotFoundException(aFileName);
+    raise new FileNotFoundException(String(aFileName));
   var lXMl := TryFromFile(aFileName, true);
   if assigned(lXMl:ErrorInfo) then
     if lXMl.ErrorInfo.Row = -1 then
@@ -419,7 +420,7 @@ begin
   raise new NotImplementedException("Not implemented for WebAssemlbly yet");
   {$ELSE}
   if {not defined("WEBASSEMBLY") and} aUrl.IsFileUrl and aUrl.FilePath.FileExists then begin
-    result := FromFile(aUrl.FilePath);
+    result := FromFile(File(aUrl.FilePath));
     if assigned(result:ErrorInfo) then
       if result.ErrorInfo.Row = -1 then
         raise new XmlException(result.ErrorInfo.Message)
@@ -446,7 +447,7 @@ begin
   {$ELSE}
     try
   if {not defined("WEBASSEMBLY") and} aUrl.IsFileUrl and aUrl.FilePath.FileExists then
-    result := TryFromFile(aUrl.FilePath, aAllowBrokenDocument)
+    result := TryFromFile(File(aUrl.FilePath), aAllowBrokenDocument)
   else if aUrl.Scheme in ["http", "https"] then //try
     {$IFDEF ISLAND}
     raise new NotImplementedException;
@@ -1016,6 +1017,12 @@ begin
   end;
 end;
 
+method XmlElement.&Add(aData: not nullable sequence of XmlElement);
+begin
+  for each lData in aData do
+    AddElement(lData);
+end;
+
 method XmlElement.Add(aElement: not nullable XmlElement);
 begin
   AddElement(aElement);
@@ -1339,8 +1346,11 @@ end;
 
 method XmlElement.GetAttributes: not nullable sequence of XmlAttribute;
 begin
+  {$IF TOFFEEV2}
+  raise new NotImplementedException("Not implemented for ToffeV2 right now");
+  {$ELSE}
   result := fAttributesAndNamespaces.Where(a -> a.NodeType = XmlNodeType.Attribute).Select(x -> x as XmlAttribute) as not nullable;
-  //result := fAttributes as not nullable;
+  {$ENDIF}
 end;
 
 method XmlElement.GetAttribute(aName: not nullable String): nullable XmlAttribute;
@@ -1367,8 +1377,8 @@ end;
 
 method XmlElement.GetAttribute(aName: not nullable String; aNamespace: nullable XmlNamespace): nullable XmlAttribute;
 begin
-  result := Attributes.Where(a -> (a.LocalName = aName) and 
-    (((aNamespace = nil) and (a.Namespace = nil)) or 
+  result := Attributes.Where(a -> (a.LocalName = aName) and
+    (((aNamespace = nil) and (a.Namespace = nil)) or
       ((aNamespace <> nil) and (a.Namespace.Prefix = aNamespace.Prefix) and (a.Namespace.Uri = aNamespace.Uri)))).FirstOrDefault;
 end;
 
@@ -1379,8 +1389,11 @@ end;
 
 method XmlElement.GetNamespaces: not nullable sequence of XmlNamespace;
 begin
- // result := fNamespaces as not nullable;
+  {$IF TOFFEEV2}
+  raise new NotImplementedException("Not implemented for ToffeV2 right now");
+  {$ELSE}
   result := fAttributesAndNamespaces.Where(a -> a.NodeType = XmlNodeType.Namespace).Select(x -> x as XmlNamespace) as not nullable;
+  {$ENDIF}
 end;
 
 method XmlElement.GetNamespaceByUri(aUri: String): nullable XmlNamespace;

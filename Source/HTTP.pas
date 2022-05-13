@@ -1,7 +1,5 @@
 ﻿namespace RemObjects.Elements.RTL;
 
-{$IF NOT WEBASSEMBLY}
-
 interface
 
 {$DEFINE XML}{$DEFINE JSON}
@@ -10,19 +8,25 @@ interface
 
 type
   HttpRequest = public class
+  unit
+    method ApplyAuthehtication;
   public
     property Mode: HttpRequestMode := HttpRequestMode.Get;
     property Headers: not nullable Dictionary<String,String> := new Dictionary<String,String>; readonly;
     property Content: nullable HttpRequestContent;
+    property ContentType: nullable String;
     property Url: not nullable Url;
     property FollowRedirects: Boolean := true;
     property AllowCellularAccess: Boolean := true;
     property UserAgent: String;
+    property Accept: String;
+
+    property Authentication: IHttpAuthentication;
 
     property Timeout: Double := 10.0; // Seconds
 
-    constructor(aUrl: not nullable Url); // log
-    constructor(aUrl: not nullable Url; aMode: HttpRequestMode); // log  := HttpRequestMode.Ge
+    constructor(aUrlString: not nullable String; aMode: HttpRequestMode := HttpRequestMode.Get);
+    constructor(aUrl: not nullable Url; aMode: HttpRequestMode := HttpRequestMode.Get);
     operator Implicit(aUrl: not nullable Url): HttpRequest;
 
     [ToString]
@@ -30,6 +34,19 @@ type
   end;
 
   HttpRequestMode = public enum (Get, Post, Head, Put, Delete, Patch, Options, Trace);
+
+  IHttpAuthentication = public interface
+    method ApplyToRequest(aRequest: HttpRequest);
+  end;
+
+  HttpBasicAuthentication = public class(IHttpAuthentication)
+  private
+    method ApplyToRequest(aRequest: HttpRequest);
+  public
+    property Username: String;
+    property Password: String;
+    constructor(aUsername, aPassword: not nullable String);
+  end;
 
   IHttpRequestContent = assembly interface
     method GetContentAsBinary(): ImmutableBinary;
@@ -56,29 +73,32 @@ type
 
   HttpResponse = public class({$IF ECHOES OR ISLAND}IDisposable{$ENDIF})
   unit
-    constructor withException(anException: Exception);
+    constructor withException(aException: Exception);
 
     {$IF COOPER}
     var Connection: java.net.HttpURLConnection;
     constructor(aConnection: java.net.HttpURLConnection);
-    {$ELSEIF TOFFEE}
+    {$ELSEIF DARWIN}
     var Data: NSData;
     constructor(aData: NSData; aResponse: NSHTTPURLResponse);
     {$ELSEIF ECHOES}
     var Response: HttpWebResponse;
     constructor(aResponse: HttpWebResponse);
+    {$ELSEIF WEBASSEMBLY}
+    var fOriginalRequest: RemObjects.Elements.WebAssembly.DOM.XMLHttpRequest; private;
+    constructor(aRequest: RemObjects.Elements.WebAssembly.DOM.XMLHttpRequest);
     {$ELSEIF ISLAND}
-      var Data: MemoryStream; readonly;
-      {$IF WINDOWS}
-      var Request: rtl.HINTERNET;
-      constructor(aRequest: rtl.HINTERNET; aCode: Int16; aData: MemoryStream);
-      {$ELSEIF LINUX}
-      constructor(aCode: Integer; aData: MemoryStream; aHeaders: not nullable Dictionary<String, String>);
-      {$ENDIF}
+    var Data: MemoryStream; readonly;
+    {$IF WINDOWS}
+    var Request: rtl.HINTERNET;
+    constructor(aRequest: rtl.HINTERNET; aCode: Int16; aData: MemoryStream);
+    {$ELSEIF LINUX}
+    constructor(aCode: Integer; aData: MemoryStream; aHeaders: not nullable Dictionary<String, String>);
+    {$ENDIF}
     {$ENDIF}
 
   public
-    property Headers: not nullable Dictionary<String,String>; readonly; //todo: list itself should be read-only
+    property Headers: not nullable ImmutableDictionary<String,String>; readonly;
     property Code: Int32; readonly;
     property Success: Boolean read (Exception = nil) and (Code < 300);
     property Exception: nullable Exception public read unit write;
@@ -87,7 +107,7 @@ type
     method GetContentAsBinary(contentCallback: not nullable HttpContentResponseBlock<ImmutableBinary>);
     {$IF XML}method GetContentAsXml(contentCallback: not nullable HttpContentResponseBlock<XmlDocument>);{$ENDIF}
     {$IF JSON}method GetContentAsJson(contentCallback: not nullable HttpContentResponseBlock<JsonDocument>);{$ENDIF}
-    method SaveContentAsFile(aTargetFile: File; contentCallback: not nullable HttpContentResponseBlock<File>);
+    method SaveContentAsFile(aTargetFile: not nullable String; contentCallback: not nullable HttpContentResponseBlock<File>);
 
     method GetContentAsStringSynchronous(aEncoding: Encoding := nil): not nullable String;
     method GetContentAsBinarySynchronous: not nullable ImmutableBinary;
@@ -119,19 +139,18 @@ type
     property Exception: nullable Exception public read unit write;
   end;
 
-  HttpResponseBlock = public block (Response: HttpResponse);
-  HttpContentResponseBlock<T> = public block (ResponseContent: HttpResponseContent<T>);
+  HttpResponseBlock = public block (Response: not nullable HttpResponse);
+  HttpContentResponseBlock<T> = public block (ResponseContent: not nullable HttpResponseContent<T>);
 
   Http = public static class
   private
-    {$IF TOFFEE}
+    {$IF DARWIN}
     property Session := NSURLSession.sessionWithConfiguration(NSURLSessionConfiguration.defaultSessionConfiguration); lazy;
+    {$ELSEIF ISLAND AND WINDOWS}
+    property Session := rtl.WinHTTPOpen('', rtl.WINHTTP_ACCESS_TYPE_NO_PROXY, nil, nil, 0); lazy;
     {$ENDIF}
     method StringForRequestType(aMode: HttpRequestMode): String;
     method ExecuteRequestSynchronous(aRequest: not nullable HttpRequest; aThrowOnError: Boolean): nullable HttpResponse;
-    {$IF ISLAND AND WINDOWS}
-    property Session := rtl.WinHTTPOpen('', rtl.WINHTTP_ACCESS_TYPE_NO_PROXY, nil, nil, 0); lazy;
-    {$ENDIF}
   public
     //method ExecuteRequest(aUrl: not nullable Url; ResponseCallback: not nullable HttpResponseBlock);
     method ExecuteRequest(aRequest: not nullable HttpRequest; ResponseCallback: not nullable HttpResponseBlock);
@@ -155,6 +174,8 @@ type
     {$ENDIF}
   end;
 
+extension method HttpRequestMode.ToHttpString: String; public;
+
 implementation
 
 uses
@@ -163,15 +184,29 @@ uses
   {$ENDIF}
   RemObjects.Elements;
 
-{ HttpRequest }
-
-constructor HttpRequest(aUrl: not nullable Url);
+extension method HttpRequestMode.ToHttpString: String;
 begin
-  Url := aUrl;
-  Mode := HttpRequestMode.Get;
+  result := case self of
+    HttpRequestMode.Delete: "DELETE";
+    HttpRequestMode.Get: "GET";
+    HttpRequestMode.Head: "HEAD";
+    HttpRequestMode.Options: "OPTIONS";
+    HttpRequestMode.Patch: "PATCH";
+    HttpRequestMode.Post: "POST";
+    HttpRequestMode.Put: "PUT";
+    HttpRequestMode.Trace: "TRACE";
+  end;
 end;
 
-constructor HttpRequest(aUrl: not nullable Url; aMode: HttpRequestMode);
+{ HttpRequest }
+
+constructor HttpRequest(aUrlString: not nullable String; aMode: HttpRequestMode := HttpRequestMode.Get);
+begin
+  Url := Url.UrlWithString(aUrlString);
+  Mode := aMode;
+end;
+
+constructor HttpRequest(aUrl: not nullable Url; aMode: HttpRequestMode := HttpRequestMode.Get);
 begin
   Url := aUrl;
   Mode := aMode;
@@ -185,6 +220,26 @@ end;
 method HttpRequest.ToString: String;
 begin
   result := Url.ToString();
+end;
+
+method HttpRequest.ApplyAuthehtication;
+begin
+  Authentication:ApplyToRequest(self);
+end;
+
+{ HttpBasicAuthentication }
+
+constructor HttpBasicAuthentication(aUsername, aPassword: not nullable String);
+begin
+  Username := aUsername;
+  Password := aPassword;
+end;
+
+method HttpBasicAuthentication.ApplyToRequest(aRequest: HttpRequest);
+begin
+  var lBytes := Encoding.UTF8.GetBytes(Username+":"+Password) includeBOM(false);
+  var lBase64 := Convert.ToBase64String(lBytes);
+  aRequest.Headers["Authorization"] := "Basic "+lBase64;
 end;
 
 { HttpRequestContent }
@@ -238,9 +293,9 @@ end;
 
 { HttpResponse }
 
-constructor HttpResponse withException(anException: Exception);
+constructor HttpResponse withException(aException: Exception);
 begin
-  self.Exception := anException;
+  Exception := aException;
   Headers := new Dictionary<String,String>();
 end;
 
@@ -251,20 +306,30 @@ begin
   Code := Connection.getResponseCode;
   Headers := new Dictionary<String,String>();
   var i := 0;
+  var lHeaders := new Dictionary<String,String>;
   loop begin
     var lKey := Connection.getHeaderFieldKey(i);
     if not assigned(lKey) then break;
     var lValue := Connection.getHeaderField(i);
-    Headers[lKey] := lValue;
+    lHeaders[lKey] := lValue;
     inc(i);
   end;
+  Headers := lHeaders;
 end;
-{$ELSEIF TOFFEE}
+{$ELSEIF DARWIN}
 constructor HttpResponse(aData: NSData; aResponse: NSHTTPURLResponse);
 begin
   Data := aData;
   Code := aResponse.statusCode;
-  Headers := aResponse.allHeaderFields as not nullable Dictionary<String,String>; // why is this cast needed?
+  if defined("TOFFEE") then begin
+    Headers := aResponse.allHeaderFields as PlatformDictionary<String,String> as not nullable ImmutableDictionary<String,String>;
+  end
+  else begin
+    var lHeaders := new Dictionary<String,String>;
+    for each k in aResponse.allHeaderFields.allKeys do
+       lHeaders[k] := aResponse.allHeaderFields[k];
+    Headers := lHeaders;
+  end;
 end;
 {$ELSEIF ECHOES}
 constructor HttpResponse(aResponse: HttpWebResponse);
@@ -272,13 +337,23 @@ begin
   Response := aResponse;
   Code := Int32(aResponse.StatusCode);
   Headers := new Dictionary<String,String>();
-  {$IF NETSTANDARD}
+  var lHeaders := new Dictionary<String,String>;
   for each k: String in aResponse.Headers:AllKeys do
-    Headers[k.ToString] := aResponse.Headers[k];
-  {$ELSE}
-  for each k: String in aResponse.Headers:Keys do
-    Headers[k.ToString] := aResponse.Headers[k];
-  {$ENDIF}
+    lHeaders[k.ToString] := aResponse.Headers[k];
+  Headers := lHeaders;
+end;
+{$ELSEIF WEBASSEMBLY}
+constructor HttpResponse(aRequest: RemObjects.Elements.WebAssembly.DOM.XMLHttpRequest);
+begin
+  fOriginalRequest := aRequest;
+  Code := aRequest.status;
+  var lHeaders := new Dictionary<String,String>;
+  for each h: String in fOriginalRequest.getAllResponseHeaders:Split(#10) do begin
+    var lSplit := h.SplitAtFirstOccurrenceof("=");
+    if lSplit.Count = 2 then
+      lHeaders[lSplit[0].Trim] := lSplit[1].Trim;
+  end;
+  Headers := lHeaders;
 end;
 {$ELSEIF ISLAND}
 {$IF WINDOWS}
@@ -293,8 +368,8 @@ begin
   if lSize > 0 then begin
     var lChars := new Char[lSize / sizeOf(Char)];
     if rtl. WinHttpQueryHeaders(Request, rtl.WINHTTP_QUERY_RAW_HEADERS_CRLF, nil {WINHTTP_HEADER_NAME_BY_INDEX}, @lChars[0], @lSize, nil {WINHTTP_NO_HEADER_INDEX}) then begin
-      var lHeaders := new String(lChars);
-      var lArray := lHeaders.Split(Environment.LineBreak);
+      var lHeaders := new Dictionary<String,String>;
+      var lArray := new String(lChars).Split(Environment.LineBreak);
       for each k: String in lArray do begin
         var lPos := k.IndexOf(':');
         if lPos > 0 then begin
@@ -302,11 +377,12 @@ begin
           var lValue := k.Substring(lPos + 1).Trim;
           // Allow multiple Set-Cookie
           if (lKey = 'Set-Cookie') and Headers.ContainsKey(lKey) then
-              Headers[lKey] := Headers[lKey]+','+lValue
+            lHeaders[lKey] := Headers[lKey]+','+lValue
           else
-              Headers[lKey] := lValue;
+            lHeaders[lKey] := lValue;
         end;
       end;
+      Headers := lHeaders;
     end;
   end;
 end;
@@ -330,7 +406,7 @@ begin
     else
       contentCallback(new HttpResponseContent<String>(Exception := content.Exception))
   end);
-  {$ELSEIF TOFFEE}
+  {$ELSEIF DARWIN}
   var s := new Foundation.NSString withData(Data) encoding(aEncoding.AsNSStringEncoding); // todo: test this
   if assigned(s) then
     contentCallback(new HttpResponseContent<String>(Content := s))
@@ -341,6 +417,8 @@ begin
     var responseString := new System.IO.StreamReader(Response.GetResponseStream(), aEncoding).ReadToEnd();
     contentCallback(new HttpResponseContent<String>(Content := responseString))
   end;
+  {$ELSEIF WEBASSEMBLY}
+  contentCallback(new HttpResponseContent<String>(Content := fOriginalRequest.responseText));
   {$ELSEIF ISLAND}
   async begin
     var lResponseString := aEncoding.GetString(Data.ToArray);
@@ -349,6 +427,7 @@ begin
   {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Binary data is not supported on WebAssembkly")]{$ENDIF}
 method HttpResponse.GetContentAsBinary(contentCallback: not nullable HttpContentResponseBlock<ImmutableBinary>);
 begin
   // maybe delegsate to GetContentAsBinarySynchronous?
@@ -364,14 +443,16 @@ begin
     end;
     contentCallback(new HttpResponseContent<ImmutableBinary>(Content := allData));
   end;
-  {$ELSEIF TOFFEE}
-  contentCallback(new HttpResponseContent<ImmutableBinary>(Content := Data.mutableCopy));
+  {$ELSEIF DARWIN}
+  contentCallback(new HttpResponseContent<ImmutableBinary>(Content := new ImmutableBinary(Data)));
   {$ELSEIF ECHOES}
   async begin
     var allData := new System.IO.MemoryStream();
     Response.GetResponseStream().CopyTo(allData);
     contentCallback(new HttpResponseContent<ImmutableBinary>(Content := allData));
   end;
+  {$ELSEIF WEBASSEMBLY}
+  raise new NotImplementedException("Binary data is not supported on WebAssembly")
   {$ELSEIF ISLAND}
   async begin
     var allData := new Binary(Data.ToArray);
@@ -383,6 +464,15 @@ end;
 {$IF XML}
 method HttpResponse.GetContentAsXml(contentCallback: not nullable HttpContentResponseBlock<XmlDocument>);
 begin
+  {$IF WEBASSEMBLY}
+  try
+    var document := XmlDocument.FromString(fOriginalRequest.responseText);
+    contentCallback(new HttpResponseContent<XmlDocument>(Content := document))
+  except
+    on E: Exception do
+      contentCallback(new HttpResponseContent<XmlDocument>(Exception := E));
+  end;
+  {$ELSE}
   GetContentAsBinary((content) -> begin
     if content.Success then begin
       try
@@ -390,7 +480,7 @@ begin
         if assigned(document) then
           contentCallback(new HttpResponseContent<XmlDocument>(Content := document))
         else
-        contentCallback(new HttpResponseContent<XmlDocument>(Exception := new RTLException("Could not parse result as XML.")));
+          contentCallback(new HttpResponseContent<XmlDocument>(Exception := new RTLException("Could not parse result as XML.")));
       except
         on E: Exception do
           contentCallback(new HttpResponseContent<XmlDocument>(Exception := E));
@@ -399,12 +489,22 @@ begin
       contentCallback(new HttpResponseContent<XmlDocument>(Exception := content.Exception));
     end;
   end);
+  {$ENDIF}
 end;
 {$ENDIF}
 
 {$IF JSON}
 method HttpResponse.GetContentAsJson(contentCallback: not nullable HttpContentResponseBlock<JsonDocument>);
 begin
+  {$IF WEBASSEMBLY}
+  try
+    var document :=  JsonDocument.FromString(fOriginalRequest.responseText);
+    contentCallback(new HttpResponseContent<JsonDocument>(Content := document))
+  except
+    on E: Exception do
+      contentCallback(new HttpResponseContent<JsonDocument>(Exception := E));
+  end;
+  {$ELSE}
   GetContentAsBinary((content) -> begin
     if content.Success then begin
       try
@@ -418,10 +518,12 @@ begin
       contentCallback(new HttpResponseContent<JsonDocument>(Exception := content.Exception));
     end;
   end);
+  {$ENDIF}
 end;
 {$ENDIF}
 
-method HttpResponse.SaveContentAsFile(aTargetFile: File; contentCallback: not nullable HttpContentResponseBlock<File>);
+{$IF WEBASSEMBLY}[Warning("File Access is not supported on WebAssembly")]{$ENDIF}
+method HttpResponse.SaveContentAsFile(aTargetFile: not nullable String; contentCallback: not nullable HttpContentResponseBlock<File>);
 begin
   {$IF COOPER}
   async begin
@@ -433,13 +535,13 @@ begin
       allData.write(data, 0, len);
       len := stream.read(data);
     end;
-    contentCallback(new HttpResponseContent<File>(Content := aTargetFile));
+    contentCallback(new HttpResponseContent<File>(Content := File(aTargetFile)));
   end;
-  {$ELSEIF TOFFEE}
+  {$ELSEIF DARWIN}
   async begin
     var error: NSError;
-    if Data.writeToFile(aTargetFile) options(NSDataWritingOptions.NSDataWritingAtomic) error(var error) then
-      contentCallback(new HttpResponseContent<File>(Content := aTargetFile))
+    if Data.writeToFile(aTargetFile as NSString) options(NSDataWritingOptions.NSDataWritingAtomic) error(var error) then
+      contentCallback(new HttpResponseContent<File>(Content := File(aTargetFile)))
     else
       contentCallback(new HttpResponseContent<File>(Exception := new RTLException withError(error)));
   end;
@@ -449,19 +551,21 @@ begin
       using responseStream := Response.GetResponseStream() do
         using fileStream := System.IO.File.OpenWrite(aTargetFile) do
           responseStream.CopyTo(fileStream);
-      contentCallback(new HttpResponseContent<File>(Content := aTargetFile));
+      contentCallback(new HttpResponseContent<File>(Content := File(aTargetFile)));
     except
       on E: Exception do
         contentCallback(new HttpResponseContent<File>(Exception := E));
     end;
   end;
+  {$ELSEIF WEBASSEMBLY}
+  raise new NotImplementedException("File Access is not supported on WebAssembly")
   {$ELSEIF ISLAND}
   async begin
     try
       var lStream := new FileStream(aTargetFile, FileOpenMode.Create or FileOpenMode.ReadWrite);
       Data.CopyTo(lStream);
       Data.Flush;
-      contentCallback(new HttpResponseContent<File>(Content := aTargetFile))
+      contentCallback(new HttpResponseContent<File>(Content := File(aTargetFile)))
     except
       on E: Exception do
         contentCallback(new HttpResponseContent<File>(Exception := E));
@@ -470,12 +574,13 @@ begin
   {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembkly")]{$ENDIF}
 method HttpResponse.GetContentAsStringSynchronous(aEncoding: Encoding := nil): not nullable String;
 begin
   if aEncoding = nil then aEncoding := Encoding.Default;
   {$IF COOPER}
   result := new String(GetContentAsBinarySynchronous().ToArray, aEncoding);
-  {$ELSEIF TOFFEE}
+  {$ELSEIF DARWIN}
   var s := new Foundation.NSString withData(Data) encoding(aEncoding.AsNSStringEncoding); // todo: test this
   if assigned(s) then
     exit s as not nullable
@@ -483,11 +588,14 @@ begin
     raise new RTLException("Invalid Encoding");
   {$ELSEIF ECHOES}
   result := new System.IO.StreamReader(Response.GetResponseStream(), aEncoding).ReadToEnd() as not nullable;
+  {$ELSEIF ISLAND AND WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
   {$ELSEIF ISLAND}
   result := aEncoding.GetString(Data.ToArray) as not nullable;
   {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembkly")]{$ENDIF}
 method HttpResponse.GetContentAsBinarySynchronous: not nullable ImmutableBinary;
 begin
   {$IF COOPER}
@@ -500,54 +608,80 @@ begin
     len := stream.read(data);
   end;
   result := allData as not nullable;
-  {$ELSEIF TOFFEE}
+  {$ELSEIF DARWIN}
   result := Data.mutableCopy as not nullable;
   {$ELSEIF ECHOES}
   var allData := new System.IO.MemoryStream();
   Response.GetResponseStream().CopyTo(allData);
   result := allData as not nullable;
+  {$ELSEIF ISLAND AND WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
   {$ELSEIF ISLAND}
   result := new Binary(Data.ToArray);
   {$ENDIF}
 end;
 
 {$IF XML}
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembkly")]{$ENDIF}
 method HttpResponse.GetContentAsXmlSynchronous: not nullable XmlDocument;
 begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
+  {$ELSE}
   result := XmlDocument.FromBinary(GetContentAsBinarySynchronous()) as not nullable;
   if not assigned(result) then
     raise new RTLException("Could not parse result as XML.");
+  {$ENDIF}
 end;
 
 method HttpResponse.TryGetContentAsXmlSynchronous: nullable XmlDocument;
 begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
+  {$ELSE}
   var lBinary := GetContentAsBinarySynchronous(); // try?
   if assigned(lBinary) then begin
     //var lError: XmlErrorInfo;
     //result := XmlDocument.TryFromBinary(lBinary, out lError) as not nullable;
     result := XmlDocument.TryFromBinary(lBinary, true) as not nullable;
   end;
+  {$ENDIF}
 end;
 {$ENDIF}
 
 {$IF JSON}
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembkly")]{$ENDIF}
 method HttpResponse.GetContentAsJsonSynchronous: not nullable JsonDocument;
 begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
+  {$ELSE}
   result := JsonDocument.FromBinary(GetContentAsBinarySynchronous());
+  {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembkly")]{$ENDIF}
 method HttpResponse.TryGetContentAsJsonSynchronous: nullable JsonDocument;
 begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
+  {$ELSE}
   var lBinary := GetContentAsBinarySynchronous(); // try?
   if assigned(lBinary) then
     result := JsonDocument.TryFromBinary(lBinary);
+  {$ENDIF}
 end;
 {$ENDIF}
 
+{$IF WEBASSEMBLY}[Warning("File Access is not supported on WebAssembly")]{$ENDIF}
 method HttpResponse.SaveContentAsFileSynchronous(aTargetFile: File);
 begin
-  File.WriteBinary(aTargetFile, GetContentAsBinarySynchronous());
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("File Access is not supported on WebAssembly")
+  {$ELSE}
+  File.WriteBinary(String(aTargetFile), GetContentAsBinarySynchronous());
   {$HINT implement more efficiently}
+  {$ENDIF}
 end;
 
 { Http }
@@ -568,6 +702,8 @@ end;
 
 method Http.ExecuteRequest(aRequest: not nullable HttpRequest; ResponseCallback: not nullable HttpResponseBlock);
 begin
+  aRequest.ApplyAuthehtication;
+
   {$IF COOPER}
   async try
     var lConnection := java.net.URL(aRequest.Url).openConnection as java.net.HttpURLConnection;
@@ -578,6 +714,12 @@ begin
     lConnection.ConnectTimeout := Integer(aRequest.Timeout*1000);
     for each k in aRequest.Headers.Keys do
       lConnection.setRequestProperty(k, aRequest.Headers[k]);
+    if assigned(aRequest.Accept) then
+      lConnection.setRequestProperty("Accept", aRequest.Accept);
+    if assigned(aRequest.UserAgent) then
+      lConnection.setRequestProperty("User-Agent", aRequest.UserAgent);
+    if assigned(aRequest.ContentType) then
+      lConnection.setRequestProperty("Content-Type", aRequest.ContentType);
 
     if assigned(aRequest.Content) then begin
       lConnection.getOutputStream().write((aRequest.Content as IHttpRequestContent).GetContentAsArray());
@@ -585,7 +727,7 @@ begin
     end;
 
     try
-      var lResponse := if lConnection.ResponseCode >= 300 then new HttpResponse withException(new HttpException(lConnection.responseCode)) else new HttpResponse(lConnection);
+      var lResponse := if lConnection.ResponseCode >= 300 then new HttpResponse withException(new HttpException(lConnection.responseCode, aRequest)) else new HttpResponse(lConnection);
       responseCallback(lResponse);
     except
       on E: Exception do
@@ -603,8 +745,12 @@ begin
     {$ENDIF}
     if assigned(aRequest.UserAgent) then
       webRequest.UserAgent := aRequest.UserAgent;
+    if assigned(aRequest.ContentType) then
+      webRequest.ContentType := aRequest.ContentType;
     webRequest.Method := StringForRequestType(aRequest.Mode);
     webRequest.Timeout := Integer(aRequest.Timeout*1000);
+    if assigned(aRequest.Accept) then
+      webRequest.Accept := aRequest.Accept;
 
     for each k in aRequest.Headers.Keys do
       webRequest.Headers[k] := aRequest.Headers[k];
@@ -636,7 +782,7 @@ begin
       try
         var webResponse := webRequest.EndGetResponse(ar) as HttpWebResponse;
         if webResponse.StatusCode >= 300 then begin
-          ResponseCallback(new HttpResponse withException(new HttpException(webResponse.StatusCode as Integer)));
+          ResponseCallback(new HttpResponse withException(new HttpException(webResponse.StatusCode as Integer, aRequest)));
           (webResponse as IDisposable).Dispose;
         end
         else begin
@@ -652,17 +798,7 @@ begin
     on E: Exception do
       ResponseCallback(new HttpResponse withException(E));
   end;
-  {$ELSEIF ISLAND}
-  async begin
-    try
-      var lResponse := ExecuteRequestSynchronous(aRequest, true);
-      ResponseCallback(lResponse);
-    except
-      on E: Exception do
-        ResponseCallback(new HttpResponse withException(E));
-    end;
-  end;
-  {$ELSEIF TOFFEE}
+  {$ELSEIF DARWIN}
   try
     var nsUrlRequest := new NSMutableURLRequest withURL(aRequest.Url) cachePolicy(NSURLRequestCachePolicy.ReloadIgnoringLocalAndRemoteCacheData) timeoutInterval(30);
 
@@ -671,17 +807,27 @@ begin
     nsUrlRequest.HTTPMethod := StringForRequestType(aRequest.Mode);
     nsUrlRequest.timeoutInterval := aRequest.Timeout;
 
-    if assigned(aRequest.Content) then
-      nsUrlRequest.HTTPBody := (aRequest.Content as IHttpRequestContent).GetContentAsBinary();
+    if assigned(aRequest.Content) then begin
+      if defined("TOFFEE") then
+        nsUrlRequest.HTTPBody := (aRequest.Content as IHttpRequestContent).GetContentAsBinary()
+      else
+        nsUrlRequest.HTTPBody := (aRequest.Content as IHttpRequestContent).GetContentAsBinary().ToNSData; {$HINT OPTIMIZE?}
+    end;
 
     for each k in aRequest.Headers.Keys do
       nsUrlRequest.setValue(aRequest.Headers[k]) forHTTPHeaderField(k);
+    if assigned(aRequest.Accept) then
+      nsUrlRequest.setValue(aRequest.Accept) forHTTPHeaderField("Accept");
+    if assigned(aRequest.UserAgent) then
+      nsUrlRequest.setValue(aRequest.UserAgent) forHTTPHeaderField("User-Agent");
+    if assigned(aRequest.ContentType) then
+      nsUrlRequest.setValue(aRequest.ContentType) forHTTPHeaderField("Content-Type");
 
     var lRequest := Session.dataTaskWithRequest(nsUrlRequest) completionHandler((data, nsUrlResponse, error) -> begin
 
       var nsHttpUrlResponse := NSHTTPURLResponse(nsUrlResponse);
       if assigned(data) and assigned(nsHttpUrlResponse) and not assigned(error) then begin
-        var response := if nsHttpUrlResponse.statusCode >= 300 then new HttpResponse withException(new HttpException(nsHttpUrlResponse.statusCode)) else new HttpResponse(data, nsHttpUrlResponse);
+        var response := if nsHttpUrlResponse.statusCode >= 300 then new HttpResponse withException(new HttpException(nsHttpUrlResponse.statusCode, aRequest)) else new HttpResponse(data, nsHttpUrlResponse);
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), () -> responseCallback(response));
       end else if assigned(error) then begin
         var response := new HttpResponse withException(new RTLException withError(error));
@@ -697,21 +843,72 @@ begin
     on E: Exception do
       ResponseCallback(new HttpResponse withException(E));
   end;
+  {$ELSEIF WEBASSEMBLY}
+  var lRequestHandle := GCHandle.Allocate(RemObjects.Elements.WebAssembly.Browser.NewXMLHttpRequest());
+  var lRequest := RemObjects.Elements.WebAssembly.DOM.XMLHttpRequest(lRequestHandle.Target);
+  lRequest.open(aRequest.Mode.ToHttpString, aRequest.Url.ToAbsoluteString, true);
+  for each k in aRequest.Headers.Keys do
+    lRequest.setRequestHeader(k, aRequest.Headers[k]);
+  if assigned(aRequest.Accept) then
+    lRequest.setRequestHeader("Accept", aRequest.Accept);
+  if assigned(aRequest.UserAgent) then
+    lRequest.setRequestHeader("User-Agent", aRequest.UserAgent);
+  if assigned(aRequest.ContentType) then
+    lRequest.setRequestHeader("Content-Type", aRequest.ContentType);
+
+  lRequest.onload := method begin
+    //writeLn("Wasm HTTP Success");
+    responseCallback(new HttpResponse(lRequest));
+    lRequestHandle.Dispose();
+  end;
+
+  lRequest.onerror := method begin
+    //writeLn("Wasm HTTP Error");
+    if length(String(lRequest.statusText)) > 0 then
+      responseCallback(new HttpResponse withException(new RTLException(lRequest.statusText)))
+    else
+      responseCallback(new HttpResponse withException(new RTLException("Request failed without providing an error.")));
+    lRequestHandle.Dispose();
+  end;
+  lRequest.send();
+  {$ELSEIF ISLAND}
+  async begin
+    try
+      var lResponse := ExecuteRequestSynchronous(aRequest, true);
+      ResponseCallback(lResponse);
+    except
+      on E: Exception do
+        ResponseCallback(new HttpResponse withException(E));
+    end;
+  end;
   {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.ExecuteRequestSynchronous(aRequest: not nullable HttpRequest): not nullable HttpResponse;
 begin
+  {$IF ISLAND AND WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
+  {$ELSE}
   result := ExecuteRequestSynchronous(aRequest, true) as not nullable;
+  {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.TryExecuteRequestSynchronous(aRequest: not nullable HttpRequest): nullable HttpResponse;
 begin
+  {$IF ISLAND AND WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
+  {$ELSE}
   result := ExecuteRequestSynchronous(aRequest, false);
+  {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.ExecuteRequestSynchronous(aRequest: not nullable HttpRequest; aThrowOnError: Boolean): nullable HttpResponse;
 begin
+  aRequest.ApplyAuthehtication;
+
   {$IF COOPER}
   var lConnection := java.net.URL(aRequest.Url).openConnection as java.net.HttpURLConnection;
 
@@ -721,6 +918,12 @@ begin
   lConnection.ConnectTimeout := Integer(aRequest.Timeout*1000);
   for each k in aRequest.Headers.Keys do
     lConnection.setRequestProperty(k, aRequest.Headers[k]);
+  if assigned(aRequest.Accept) then
+    lConnection.setRequestProperty("Accept", aRequest.Accept);
+  if assigned(aRequest.UserAgent) then
+    lConnection.setRequestProperty("User-Agent", aRequest.UserAgent);
+  if assigned(aRequest.ContentType) then
+    lConnection.setRequestProperty("Content-Type", aRequest.ContentType);
 
   if assigned(aRequest.Content) then begin
     lConnection.getOutputStream().write((aRequest.Content as IHttpRequestContent).GetContentAsArray());
@@ -730,7 +933,7 @@ begin
   result := new HttpResponse(lConnection);
   if lConnection.ResponseCode >= 300 then begin
     if not aThrowOnError then exit nil;
-    raise new HttpException(String.Format("Unable to complete request. Error code: {0}", lConnection.responseCode), result)
+    raise new HttpException(String.Format("Unable to complete request. Error code: {0}", lConnection.responseCode), aRequest, result)
   end;
 
   {$ELSEIF ECHOES}
@@ -740,8 +943,12 @@ begin
     {$ENDIF}
     if assigned(aRequest.UserAgent) then
       webRequest.UserAgent := aRequest.UserAgent;
+    if assigned(aRequest.ContentType) then
+      webRequest.ContentType := aRequest.ContentType;
     webRequest.Method := StringForRequestType(aRequest.Mode);
     webRequest.Timeout := Integer(aRequest.Timeout*1000);
+    if assigned(aRequest.Accept) then
+      webRequest.Accept := aRequest.Accept;
 
     for each k in aRequest.Headers.Keys do
       webRequest.Headers[k] := aRequest.Headers[k];
@@ -775,9 +982,9 @@ begin
         end
         else begin
           if E.Response is HttpWebResponse then
-            raise new HttpException(E.Message, new HttpResponse(E.Response as HttpWebResponse))
+            raise new HttpException(E.Message, aRequest, new HttpResponse(E.Response as HttpWebResponse))
           else
-            raise new HttpException(E.Message);
+            raise new HttpException(E.Message, aRequest);
         end;
       end;
     end;
@@ -867,6 +1074,8 @@ begin
       raise new RTLException(E.Message);
     end;
   end;
+  {$ELSEIF ISLAND AND WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembly")
   {$ELSEIF ISLAND AND LINUX}
   var lRequest := CurlHelper.EasyInit();
   var lStream := new MemoryStream();
@@ -889,6 +1098,11 @@ begin
   var lHeaderList: ^curl_slist := nil;
   for each k in aRequest.Headers.Keys do begin
     lHeader := k + ':' + aRequest.Headers[k];
+    lHeaderBytes := lHeader.ToAnsiChars(true);
+    lHeaderList := CurlHelper.SListAppend(lHeaderList, @lHeaderBytes[0]);
+  end;
+  if assigned(aRequest.Accept) then begin
+    lHeader := 'Accept:' + aRequest.Accept;
     lHeaderBytes := lHeader.ToAnsiChars(true);
     lHeaderList := CurlHelper.SListAppend(lHeaderList, @lHeaderBytes[0]);
   end;
@@ -942,7 +1156,7 @@ begin
     if not aThrowOnError then exit nil;
     raise new RTLException(String.Format("Unable to complete request. LibCurl Error code: {0}", lResult), result);
   end;
-  {$ELSEIF TOFFEE}
+  {$ELSEIF DARWIN}
   var nsUrlRequest := new NSMutableURLRequest withURL(aRequest.Url) cachePolicy(NSURLRequestCachePolicy.ReloadIgnoringLocalAndRemoteCacheData) timeoutInterval(30);
 
   //nsUrlRequest.AllowAutoRedirect := aRequest.FollowRedirects;
@@ -950,11 +1164,21 @@ begin
   nsUrlRequest.HTTPMethod := StringForRequestType(aRequest.Mode);
   nsUrlRequest.timeoutInterval := aRequest.Timeout;
 
-  if assigned(aRequest.Content) then
-    nsUrlRequest.HTTPBody := (aRequest.Content as IHttpRequestContent).GetContentAsBinary();
+  if assigned(aRequest.Content) then begin
+    if defined("TOFFEE") then
+      nsUrlRequest.HTTPBody := (aRequest.Content as IHttpRequestContent).GetContentAsBinary()
+    else
+      nsUrlRequest.HTTPBody := (aRequest.Content as IHttpRequestContent).GetContentAsBinary().ToNSData; {$HINT OPTIMIZE?}
+  end;
 
   for each k in aRequest.Headers.Keys do
     nsUrlRequest.setValue(aRequest.Headers[k]) forHTTPHeaderField(k);
+  if assigned(aRequest.Accept) then
+    nsUrlRequest.setValue(aRequest.Accept) forHTTPHeaderField("Accept");
+  if assigned(aRequest.UserAgent) then
+    nsUrlRequest.setValue(aRequest.UserAgent) forHTTPHeaderField("User-Agent");
+  if assigned(aRequest.ContentType) then
+    nsUrlRequest.setValue(aRequest.ContentType) forHTTPHeaderField("Content-Type");
 
   var nsUrlResponse : NSURLResponse;
   var error: NSError;
@@ -965,26 +1189,31 @@ begin
 
   var nsHttpUrlResponse := NSHTTPURLResponse(nsUrlResponse);
   if assigned(data) and assigned(nsHttpUrlResponse) and not assigned(error) then begin
-    result := new HttpResponse(data, nsHttpUrlResponse);
+    if defined("TOFFEE") then
+      result := new HttpResponse(data, nsHttpUrlResponse)
+    else
+      result := new HttpResponse(data, nsHttpUrlResponse);
     if nsHttpUrlResponse.statusCode >= 300 then begin
       if not aThrowOnError then exit nil;
-      raise new HttpException(String.Format("Unable to complete request. Error code: {0}", nsHttpUrlResponse.statusCode), result)
+      raise new HttpException(String.Format("Unable to complete request. Error code: {0}", nsHttpUrlResponse.statusCode), aRequest, result)
     end;
   end
   else if assigned(error) then begin
     if not aThrowOnError then exit nil;
     if assigned(nsHttpUrlResponse) then
-      raise new HttpException(error.description, new HttpResponse(nil, nsHttpUrlResponse))
+      raise new HttpException(error.description, aRequest, new HttpResponse(nil, nsHttpUrlResponse))
     else
       raise new RTLException withError(error);
   end
   else begin
     if not aThrowOnError then exit nil;
     if assigned(nsHttpUrlResponse) then
-      raise new HttpException(String.Format("Request failed without providing an error. Error code: {0}", nsHttpUrlResponse.statusCode), new HttpResponse(nil, nsHttpUrlResponse))
+      raise new HttpException(String.Format("Request failed without providing an error. Error code: {0}", nsHttpUrlResponse.statusCode), aRequest, new HttpResponse(nil, nsHttpUrlResponse))
     else
       raise new RTLException("Request failed without providing an error.");
   end;
+  {$ELSE}
+  raise new NotImplementedException("Http.ExecuteRequestSynchronous is not implemented for this platform")
   {$ENDIF}
 end;
 
@@ -1006,8 +1235,12 @@ begin
   end);
 end;
 
+{$IF WEBASSEMBLY}[Warning("Binary data is not supported on WebAssembly")]{$ENDIF}
 method Http.ExecuteRequestAsBinary(aRequest: not nullable HttpRequest; contentCallback: not nullable HttpContentResponseBlock<ImmutableBinary>);
 begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Binary Data is not supported on WebAssembkly")
+  {$ELSE}
   Http.ExecuteRequest(aRequest, (response) -> begin
     if response.Success then begin
       response.GetContentAsBinary( (content) -> begin
@@ -1017,6 +1250,7 @@ begin
       contentCallback(new HttpResponseContent<ImmutableBinary>(Exception := response.Exception));
     end;
   end);
+  {$ENDIF}
 end;
 
 {$IF XML}
@@ -1049,63 +1283,92 @@ begin
 end;
 {$ENDIF}
 
+{$IF WEBASSEMBLY}[Warning("File Access is not supported on WebAssembkly")]{$ENDIF}
 method Http.ExecuteRequestAndSaveAsFile(aRequest: not nullable HttpRequest; aTargetFile: not nullable File; contentCallback: not nullable HttpContentResponseBlock<File>);
 begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("File Access is not supported on WebAssembkly")
+  {$ELSE}
   Http.ExecuteRequest(aRequest, (response) -> begin
     if response.Success then begin
-      response.SaveContentAsFile(aTargetFile, (content) -> begin
+      response.SaveContentAsFile(String(aTargetFile), (content) -> begin
         contentCallback(content)
       end);
     end else begin
       contentCallback(new HttpResponseContent<File>(Exception := response.Exception));
     end;
   end);
+  {$ENDIF}
 end;
 
 {$IF NOT NETFX_CORE}
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.GetString(aEncoding: Encoding := nil; aRequest: not nullable HttpRequest): not nullable String;
 begin
-  using lResponse := ExecuteRequestSynchronous(aRequest) do begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembkly")
+  {$ELSE}
+  using lResponse := ExecuteRequestSynchronous(aRequest) do
     result := lResponse.GetContentAsStringSynchronous(aEncoding);
-  end;
+  {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.GetBinary(aRequest: not nullable HttpRequest): not nullable ImmutableBinary;
 begin
-  using lResponse := ExecuteRequestSynchronous(aRequest) do begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembkly")
+  {$ELSE}
+  using lResponse := ExecuteRequestSynchronous(aRequest) do
     result := lResponse.GetContentAsBinarySynchronous;
-  end;
+  {$ENDIF}
 end;
 
 {$IF XML}
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.GetXml(aRequest: not nullable HttpRequest): not nullable XmlDocument;
 begin
-  using lResponse := ExecuteRequestSynchronous(aRequest) do begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembkly")
+  {$ELSE}
+  using lResponse := ExecuteRequestSynchronous(aRequest) do
     result := lResponse.GetContentAsXmlSynchronous;
-  end;
+  {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.TryGetXml(aRequest: not nullable HttpRequest): nullable XmlDocument;
 begin
-  using lResponse := TryExecuteRequestSynchronous(aRequest) do begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembkly")
+  {$ELSE}
+  using lResponse := TryExecuteRequestSynchronous(aRequest) do
     result := lResponse:TryGetContentAsXmlSynchronous;
-  end;
+  {$ENDIF}
 end;
 {$ENDIF}
 
 {$IF JSON}
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.GetJson(aRequest: not nullable HttpRequest): not nullable JsonDocument;
 begin
-  using lResponse := ExecuteRequestSynchronous(aRequest) do begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembkly")
+  {$ELSE}
+  using lResponse := ExecuteRequestSynchronous(aRequest) do
     result := lResponse.GetContentAsJsonSynchronous;
-  end;
+  {$ENDIF}
 end;
 
+{$IF WEBASSEMBLY}[Warning("Synchronous requests are not supported on WebAssembly")]{$ENDIF}
 method Http.TryGetJson(aRequest: not nullable HttpRequest): nullable JsonDocument;
 begin
-  using lResponse := TryExecuteRequestSynchronous(aRequest) do begin
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Synchronous requests are not supported on WebAssembkly")
+  {$ELSE}
+  using lResponse := TryExecuteRequestSynchronous(aRequest) do
     result := lResponse:TryGetContentAsJsonSynchronous;
-  end;
+  {$ENDIF}
 end;
 {$ENDIF}
 {$ENDIF}
@@ -1217,7 +1480,5 @@ begin
   end;
 end;
 *)
-
-{$ENDIF}
 
 end.

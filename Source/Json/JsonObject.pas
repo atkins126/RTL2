@@ -3,7 +3,7 @@
 interface
 
 type
-  JsonObject = public class(JsonNode, sequence of tuple of (String, JsonNode))
+  JsonObject = public class(JsonNode)
   private
     fItems: Dictionary<String, JsonNode>;
     method GetItem(aKey: not nullable String): nullable JsonNode;
@@ -25,9 +25,9 @@ type
     method ContainsKey(aKey: not nullable String): Boolean; // will return false for non-exist-ent keys and for JsonNullValue!
     method ContainsExplicitJsonNullValueForKey(aKey: not nullable String): Boolean; // will return false for non-exist-ent keys and values other than JsonNullValue!
 
-    method ToJson: String; override;
+    method ToJson(aFormat: JsonFormat := JsonFormat.HumanReadable): String; override;
 
-    [&Sequence]
+    {$IF NOT TOFFEE}[&Sequence]{$ENDIF}
     method GetSequence: sequence of tuple of (String, JsonNode); iterator;
     begin
       for each kv in fItems do
@@ -138,9 +138,9 @@ begin
   exit fItems.Keys as not nullable;
 end;
 
-method JsonObject.ToJson: String;
+method JsonObject.ToJson(aFormat: JsonFormat := JsonFormat.HumanReadable): String;
 begin
-  var Serializer := new JsonSerializer(self);
+  var Serializer := new JsonSerializer(self, aFormat);
   result := Serializer.Serialize;
 end;
 

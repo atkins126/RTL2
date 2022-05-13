@@ -3,7 +3,7 @@
 interface
 
 type
-  OperatingSystem = public enum(Unknown, Windows, Linux, macOS, iOS, tvOS, watchOS, Android, WindowsPhone, Xbox, Browser);
+  OperatingSystem = public enum (Unknown, Windows, Linux, macOS, iOS, tvOS, watchOS, Android, Fuchsia, Xbox, Browser);
 
   ApplicationContext = public Object;
 
@@ -20,6 +20,8 @@ type
     method GetOSArchitecture: String;
     method GetProcessBitness: Int32;
     method GetProcessArchitecture: String;
+    method GetMode: String;
+    method GetPlatform: String;
     method GetEnvironmentVariable(aName: String): String;
     method SetEnvironmentVariable(aName: String; aValue: String);
     method GetCurrentDirectory: String;
@@ -66,6 +68,8 @@ type
     property OSVersion: String read GetOSVersion;
     property OSBitness: Int32 read GetOSBitness;
     property ProcessBitness: Int32 read GetProcessBitness;
+    property Mode: String read GetMode;
+    property Platform: String read GetPlatform;
 
     [Obsolete]
     property Architecture: String read GetOSArchitecture;
@@ -124,6 +128,8 @@ type
     {$ELSE}
     property EnvironmentVariable[aName: String]: String read GetEnvironmentVariable write SetEnvironmentVariable;
     {$ENDIF}
+
+    {$IF WEBASSEMBLY}[Warning("Environment.CurrentDirectory is not available on WebAssebly")]{$ENDIF}
     property CurrentDirectory: String read GetCurrentDirectory;
   end;
 
@@ -326,10 +332,10 @@ begin
     rtl.SHGetSpecialFolderLocation(nil, rtl.CSIDL_DESKTOPDIRECTORY, @lDir);
     rtl.SHGetPathFromIDList(lDir, @lTmp[0]);
     lAllocator.Free(lDir);
-    result := new String(lTmp).TrimEnd([Chr(0)]);
+    result := Folder(new String(lTmp).TrimEnd([Chr(0)]));
   end
   else
-    result := '';
+    result := Folder('');
   {$ELSEIF ISLAND AND POSIX}
   {$WARNING Not Implemented for Island yet}
   {$ENDIF}
@@ -355,8 +361,8 @@ method Environment.GetUserApplicationSupportFolder: Folder;
 begin
   {$IF ECHOES}
   case OS of
-    OperatingSystem.macOS: result := MacFolders.GetFolder(MacDomains.kUserDomain, MacFolderTypes.kApplicationSupportFolderType);
-    OperatingSystem.Windows: result := System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData);
+    OperatingSystem.macOS: result := Folder(MacFolders.GetFolder(MacDomains.kUserDomain, MacFolderTypes.kApplicationSupportFolderType));
+    OperatingSystem.Windows: result := Folder(System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData));
   end;
   {$ELSEIF TOFFEE}
   result := Folder(NSSearchPathForDirectoriesInDomains(NSSearchPathDirectory.ApplicationSupportDirectory, NSSearchPathDomainMask.UserDomainMask, true).objectAtIndex(0));
@@ -373,7 +379,7 @@ method Environment.GetSystemApplicationSupportFolder: Folder;
 begin
   {$IF ECHOES}
   case OS of
-    OperatingSystem.macOS: result := MacFolders.GetFolder(MacDomains.kLocalDomain, MacFolderTypes.kApplicationSupportFolderType);
+    OperatingSystem.macOS: result := Folder(MacFolders.GetFolder(MacDomains.kLocalDomain, MacFolderTypes.kApplicationSupportFolderType));
     //OperatingSystem.Windows: result := System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData);
   end;
   {$ELSEIF TOFFEE}
@@ -389,7 +395,7 @@ method Environment.GetUserLibraryFolder: Folder;
 begin
   {$IF ECHOES}
   if OS = OperatingSystem.macOS then
-    result := MacFolders.GetFolder(MacDomains.kUserDomain, MacFolderTypes.kDomainLibraryFolderType);
+    result := Folder(MacFolders.GetFolder(MacDomains.kUserDomain, MacFolderTypes.kDomainLibraryFolderType));
   {$ELSEIF TOFFEE}
   result := Folder(NSSearchPathForDirectoriesInDomains(NSSearchPathDirectory.LibraryDirectory, NSSearchPathDomainMask.UserDomainMask, true).objectAtIndex(0));
   {$ENDIF}
@@ -407,7 +413,7 @@ begin
   case OS of
     OperatingSystem.macOS: begin
         //result := MacFolders.GetFolder(MacDomains.kUserDomain, MacFolderTypes.kDomainLibraryFolderType);
-        result := Path.Combine(GetUserApplicationSupportFolder, "Downloads");
+        result := Folder(Path.Combine(String(GetUserApplicationSupportFolder), "Downloads"));
       end;
     OperatingSystem.Windows: begin
         var lFolder: IntPtr;
@@ -484,6 +490,8 @@ begin
     exit OperatingSystem.Android;
     {$ELSEIF WINDOWS}
     exit OperatingSystem.Windows;
+    {$ELSEIF FUCHSIA}
+    exit OperatingSystem.Fuchsia;
     {$ELSEIF WEBASSEMBLY}
     exit OperatingSystem.Browser;
     {$ELSEIF DARWIN}
@@ -570,7 +578,6 @@ begin
       exit System.Environment.OSVersion.Version.ToString;
     end;
   end;
-
   {$ELSEIF ISLAND}
   exit RemObjects.Elements.System.Environment.OSVersion;
   {$ENDIF}
@@ -737,6 +744,34 @@ begin
   {$ENDIF}
 end;
 
+method Environment.GetMode: String;
+begin
+  {$IF COOPER}
+  result := "Echoes";
+  {$ELSEIF ISLAND}
+  result := "Island";
+  {$ELSEIF ECHOES}
+  result := "Echoes";
+  {$ELSEIF TOFFEE}
+  result := "Toffee";
+  {$ENDIF}
+end;
+
+method Environment.GetPlatform: String;
+begin
+  {$IF COOPER}
+  result := "Java";
+  {$ELSEIF TOFFEEV2}
+  result := "Island/Cocoa";
+  {$ELSEIF ISLAND}
+  result := "Island";
+  {$ELSEIF ECHOES}
+  result := ".NET";
+  {$ELSEIF TOFFEE}
+  result := "Cocoa";
+  {$ENDIF}
+end;
+
 method Environment.GetCurrentDirectory(): String;
 begin
   {$IF COOPER}
@@ -746,7 +781,11 @@ begin
   {$ELSEIF ECHOES}
   exit System.Environment.CurrentDirectory;
   {$ELSEIF ISLAND}
+  {$IF WEBASSEMBLY}
+  raise new NotImplementedException("Environment.CurrentDirectory is not available on WebAssebly")
+  {$ELSE}
   exit RemObjects.Elements.System.Environment.CurrentDirectory;
+  {$ENDIF}
   {$ENDIF}
 end;
 

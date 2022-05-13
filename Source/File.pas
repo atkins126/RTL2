@@ -48,7 +48,7 @@ type
     class method ReadBinary(aFileName: String): ImmutableBinary;
     class method WriteBytes(aFileName: String; Content: array of Byte);
     class method WriteText(aFileName: String; Content: String; aEncoding: Encoding := nil);
-    class method WriteLines(aFileName: String; Content: ImmutableList<String>; aEncoding: Encoding := nil);
+    class method WriteLines(aFileName: String; Content: sequence of String; aEncoding: Encoding := nil);
     class method WriteBinary(aFileName: String; Content: ImmutableBinary);
     class method AppendText(aFileName: String; Content: String);
     class method AppendBytes(aFileName: String; Content: array of Byte);
@@ -84,7 +84,7 @@ begin
   ArgumentNullException.RaiseIfNil(Destination, "Destination");
   ArgumentNullException.RaiseIfNil(NewName, "NewName");
 
-  var lNewFile := File(Path.Combine(Destination, NewName));
+  var lNewFile := File(Path.Combine(String(Destination), NewName));
 
   {$IF COOPER}
   new java.io.File(lNewFile).createNewFile;
@@ -102,7 +102,7 @@ begin
   if aCloneIfPossible and (Environment.OS = OperatingSystem.macOS) and (Environment.macOS.IsHighSierraOrAbove) then begin
     if lNewFile.Exists then
       Delete(lNewFile);
-    if Foundation.copyfile(mapped, lNewFile, 0, Foundation.COPYFILE_CLONE) ≠ 0 then
+    if Foundation.copyfile(mapped, String(lNewFile), 0, Foundation.COPYFILE_CLONE) ≠ 0 then
       raise new RTLException("Failed to copy file");
   end
   else
@@ -163,7 +163,6 @@ begin
   result := aFileName:Exists;
 end;
 
-{$IF ISLAND}[Error("This method is not implemented for Islanbd")]{$ENDIF}
 method File.IsReadOnly: Boolean;
 begin
   if not Exists then
@@ -180,18 +179,13 @@ begin
     exit false;
   result := System.IO.File.GetAttributes(mapped) and System.IO.FileAttributes.ReadOnly = System.IO.FileAttributes.ReadOnly;
   {$ELSEIF ISLAND}
-  raise new NotImplementedException("File.IsReadOnly is not implemented for Island")
+  result := IslandFile.IsReadOnly;
   {$ENDIF}
 end;
 
-{$IF ISLAND}[Error("This method is not implemented for Islanbd")]{$ENDIF}
 class method File.IsReadOnly(aFileName: nullable File): Boolean;
 begin
-  {$IF ISLAND}
-  raise new NotImplementedException("File.IsReadOnly is not implemented for Island")
-  {$ELSE}
   result := aFileName:IsReadOnly;
-  {$ENDIF}
 end;
 
 method File.Move(NewPathAndName: not nullable File): not nullable File;
@@ -376,7 +370,7 @@ begin
   WriteBytes(aFileName, Content.ToByteArray(aEncoding));
 end;
 
-class method File.WriteLines(aFileName: String; Content: ImmutableList<String>; aEncoding: Encoding := nil);
+class method File.WriteLines(aFileName: String; Content: sequence of String; aEncoding: Encoding := nil);
 begin
   WriteText(aFileName, Content.JoinedString(Environment.LineBreak));
 end;

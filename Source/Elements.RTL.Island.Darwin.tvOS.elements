@@ -18,6 +18,8 @@
     <GenerateDebugInfo>True</GenerateDebugInfo>
     <KnownConditionalDefines>DEBUG;TRACE</KnownConditionalDefines>
     <SDK>tvOS</SDK>
+    <DeploymentTargetVersion>9.0</DeploymentTargetVersion>
+    <DefaultUses>Foundation</DefaultUses>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <Optimize>false</Optimize>

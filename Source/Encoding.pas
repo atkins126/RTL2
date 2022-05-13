@@ -52,26 +52,40 @@ type
 
     class property &Default: not nullable Encoding read UTF8;
 
-    class method DetectFromBytes(aBytes: array of Byte): nullable Encoding;
+    class method DetectFromBytes(aBytes: array of Byte): nullable Encoding; inline;
+    begin
+      DetectFromBytes(aBytes, out var nil);
+    end;
+
+    class method DetectFromBytes(aBytes: array of Byte; out aSkipBytes: Integer): nullable Encoding;
     begin
       var len := length(aBytes);
       if len < 2 then
         exit nil;
 
-      if (aBytes[0] = $EF) and (aBytes[1] = $BB) and (len ≥ 3) and (aBytes[2] = $BF) then
+      if (aBytes[0] = $EF) and (aBytes[1] = $BB) and (len ≥ 3) and (aBytes[2] = $BF) then begin
+        aSkipBytes := 3;
         exit UTF8;
-      if (aBytes[0] = $FE) and (aBytes[1] = $FF)  then
+      end;
+      if (aBytes[0] = $FE) and (aBytes[1] = $FF)  then begin
+        aSkipBytes := 2;
         exit UTF16BE;
+      end;
       if (aBytes[0] = $FF) and (aBytes[1] = $FE)  then begin
-        if (len ≥ 5) and (aBytes[2] = $00) and (aBytes[3] = $00) then
+        if (len ≥ 4) and (aBytes[2] = $00) and (aBytes[3] = $00) then begin
+          aSkipBytes := 4;
           exit UTF32BE;
+        end;
+        aSkipBytes := 2;
         exit UTF16LE;
       end;
-      if (aBytes[0] = $00) and (aBytes[1] = $00) and (len ≥ 5) and (aBytes[2] = $FE) and (aBytes[3] = $FF) then
+      if (aBytes[0] = $00) and (aBytes[1] = $00) and (len ≥ 4) and (aBytes[2] = $FE) and (aBytes[3] = $FF) then begin
+        aSkipBytes := 4;
         exit UTF32BE;
+      end;
     end;
 
-    {$IF TOFFEE}
+    {$IF DARWIN}
     method AsNSStringEncoding: NSStringEncoding;
     class method FromNSStringEncoding(aEncoding: NSStringEncoding): Encoding;
     {$ENDIF}
@@ -324,15 +338,43 @@ begin
   {$ENDIF}
 end;
 
-{$IF TOFFEE}
+{$IF DARWIN}
 method Encoding.AsNSStringEncoding: NSStringEncoding;
 begin
+  {$IF TOFFEE}
   result := (self as NSNumber).unsignedIntegerValue as NSStringEncoding;
+  {$ELSE}
+  case Name of
+    'UTF8','UTF-8': result := NSStringEncoding.UTF8StringEncoding;
+    'UTF16','UTF-16': result := NSStringEncoding.UTF16StringEncoding; //?
+    'UTF32','UTF-32': result := NSStringEncoding.UTF32StringEncoding; //?
+    'UTF16LE','UTF-16LE': result := NSStringEncoding.UTF16LittleEndianStringEncoding;
+    'UTF16BE','UTF-16BE': result := NSStringEncoding.UTF16BigEndianStringEncoding;
+    'UTF32LE','UTF-32LE': result := NSStringEncoding.UTF32LittleEndianStringEncoding;
+    'UTF32BE','UTF-32BE': result := NSStringEncoding.UTF32BigEndianStringEncoding;
+    'US-ASCII', 'ASCII','UTF-ASCII': result := NSStringEncoding.ASCIIStringEncoding;
+    else raise new Exception(String.Format('Unknown Encoding "{0}"', Name));
+  end;
+  {$ENDIF}
 end;
 
 class method Encoding.FromNSStringEncoding(aEncoding: NSStringEncoding): Encoding;
 begin
+  {$IF TOFFEE}
   result := NSNumber.numberWithUnsignedInteger(aEncoding);
+  {$ELSE}
+  case aEncoding of
+    NSStringEncoding.UTF8StringEncoding: result := Encoding.UTF8;
+    //NSStringEncoding.UTF16StringEncoding: result := Encoding.UTF16BE;
+    //NSStringEncoding.UTF32StringEncoding: result := Encoding.UTF32;
+    NSStringEncoding.UTF16LittleEndianStringEncoding: result := Encoding.UTF16LE;
+    NSStringEncoding.UTF16BigEndianStringEncoding: result := Encoding.UTF16BE;
+    NSStringEncoding.UTF32LittleEndianStringEncoding: result := Encoding.UTF32LE;
+    NSStringEncoding.UTF32BigEndianStringEncoding: result := Encoding.UTF32BE;
+    NSStringEncoding.ASCIIStringEncoding: result := Encoding.ASCII;
+    else raise new Exception(String.Format("Unsupported Encoding #{0}", aEncoding as Integer));
+  end;
+  {$ENDIF}
 end;
 
 {$ENDIF}

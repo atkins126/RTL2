@@ -97,6 +97,7 @@ type
     method HexStringToByteArray(aData: not nullable String): array of Byte;
     method TryBinaryStringToUInt64(aValue: nullable String): nullable UInt64;
 
+    method ToBase64String(S: array of Byte): not nullable String; inline;
     method ToBase64String(S: array of Byte; aStartIndex: Int32; aLength: Int32): not nullable String;
     method Base64StringToByteArray(S: String): array of Byte;
   end;
@@ -345,6 +346,8 @@ begin
     result := result + DigitForValue(aValue shr (i*4) and $0f);
   if aWidth = 0 then
     result := TrimLeadingZeros(result);
+  if length(result) = 0 then
+    result := "0";
 end;
 
 method Convert.ToOctalString(aValue: UInt64; aWidth: Integer := 0): not nullable String;
@@ -356,6 +359,8 @@ begin
     result := result + DigitForValue(aValue shr (i*3) and $07);
   if aWidth = 0 then
     result := TrimLeadingZeros(result);
+  if length(result) = 0 then
+    result := "0";
 end;
 
 method Convert.ToBinaryString(aValue: UInt64; aWidth: Integer := 0): not nullable String;
@@ -367,6 +372,8 @@ begin
     result := result + DigitForValue(aValue shr i and $01);
   if aWidth = 0 then
     result := TrimLeadingZeros(result);
+  if length(result) = 0 then
+    result := "0";
 end;
 
 method Convert.ToHexString(aData: array of Byte; aOffset: Integer; aCount: Integer): not nullable String;
@@ -518,6 +525,11 @@ begin
   end;
 end;
 
+method Convert.ToBase64String(S: array of Byte): not nullable String;
+begin
+  result := ToBase64String(S, 0, length(S));
+end;
+
 method Convert.ToBase64String(S: array of Byte; aStartIndex: Int32; aLength: Int32): not nullable String;
   const Codes64: String = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 begin
@@ -541,9 +553,9 @@ begin
     x := b shl (6 - a);
     sb.Append(Codes64[x]);
   end;
-  var lRemainder := sb.Length mod 3;
-  if lRemainder <> 0 then
-    sb.Append('=', (3-lRemainder));
+  var lRemainder := sb.Length mod 4;
+  if lRemainder > 0 then
+    sb.Append('=', (4-lRemainder));
   result := sb.ToString as not nullable;
 end;
 

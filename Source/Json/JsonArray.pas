@@ -3,7 +3,7 @@
 interface
 
 type
-  JsonArray = public class (JsonNode, sequence of JsonNode)
+  JsonArray = public class (JsonNode)
   private
     fItems: not nullable List<JsonNode>;
     method GetItem(aIndex: Integer): not nullable JsonNode;
@@ -27,16 +27,18 @@ type
     method Clear;
     method &RemoveAt(aIndex: Integer);
 
-    method ToStrings: not nullable sequence of String;
-    method ToStringList: not nullable ImmutableList<String>;
+    //method ToStrings: not nullable sequence of String;
+    //method ToStringList: not nullable ImmutableList<String>;
 
-    method ToJson: String; override;
+    method ToJson(aFormat: JsonFormat := JsonFormat.HumanReadable): String; override;
 
+    {$IF NOT TOFFEE}
     [&Sequence]
     method GetSequence: sequence of JsonNode; iterator;
     begin
       yield fItems;
     end;
+    {$ENDIF}
 
     {$IF TOFFEE AND NOT TOFFEEV2}
     method countByEnumeratingWithState(aState: ^NSFastEnumerationState) objects(stackbuf: ^JsonNode) count(len: NSUInteger): NSUInteger;
@@ -70,7 +72,7 @@ type
 
     operator Implicit(aValue: JsonArray): ImmutableList<JsonNode>;
     begin
-      result := aValue.ToList();
+      result := aValue.fItems;
     end;
 
     operator Implicit(aValue: JsonArray): array of JsonNode;
@@ -95,7 +97,9 @@ end;
 {$IF NOT COOPER}
 constructor JsonArray(aItems: not nullable ImmutableList<String>);
 begin
-  fItems := aItems.Select(v -> new JsonStringValue(v) as JsonNode).ToList as not nullable;
+  fItems := new List<JsonNode>();
+  for each el in aItems do
+    fItems.Add(new JsonStringValue(el));
 end;
 {$ENDIF}
 
@@ -136,7 +140,9 @@ end;
 
 method JsonArray.Add(aValues: ImmutableList<String>);
 begin
-  fItems.Add(aValues.Select(s -> new JsonStringValue(s) as JsonNode));
+  for each el in aValues do begin
+    fItems.Add(new JsonStringValue(el));
+  end;
 end;
 
 method JsonArray.Add(params aValues: array of String);
@@ -170,9 +176,9 @@ begin
   result := lValue as JsonArray as not nullable;
 end;
 
-method JsonArray.ToJson: String;
+method JsonArray.ToJson(aFormat: JsonFormat := JsonFormat.HumanReadable): String;
 begin
-  var Serializer := new JsonSerializer(self);
+  var Serializer := new JsonSerializer(self, aFormat);
   exit Serializer.Serialize;
 end;
 
@@ -185,14 +191,14 @@ begin
 end;
 {$ENDIF}
 
-method JsonArray.ToStrings: not nullable sequence of String;
-begin
-  result := self.Where(i -> i is JsonStringValue).Select(i -> i.StringValue) as not nullable;
-end;
+//method JsonArray.ToStrings: not nullable sequence of String;
+//begin
+  //result := fItems.Where(i -> i is JsonStringValue).Select(i -> i.StringValue) as not nullable;
+//end;
 
-method JsonArray.ToStringList: not nullable ImmutableList<String>;
-begin
-  result := ToStrings().ToList() as not nullable;
-end;
+//method JsonArray.ToStringList: not nullable ImmutableList<String>;
+//begin
+  //result := ToStrings().ToList() as not nullable;
+//end;
 
 end.

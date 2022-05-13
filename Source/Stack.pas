@@ -6,7 +6,17 @@ type
   PlatformImmutableStack<T> = public {$IF COOPER}java.util.Stack<T>{$ELSEIF TOFFEE}Foundation.NSArray{$ELSEIF ECHOES}System.Collections.Generic.Stack<T>{$ELSEIF ISLAND}RemObjects.Elements.System.Stack<T>{$ENDIF};
   PlatformStack<T> = public {$IF COOPER}java.util.Stack<T>{$ELSEIF TOFFEE}Foundation.NSMutableArray{$ELSEIF ECHOES}System.Collections.Generic.Stack<T>{$ELSEIF ISLAND}RemObjects.Elements.System.Stack<T>{$ENDIF};
 
-  ImmutableStack<T> = public class mapped to PlatformImmutableStack<T>
+  IImmutableStack<T> = public interface
+    method Contains(Item: T): Boolean;
+    method Peek: T;
+    method ToArray: array of T;
+    property Count: Integer read;
+  end;
+
+  ImmutableStack<T> = public class (IImmutableStack<T>) mapped to PlatformImmutableStack<T>
+  {$IFDEF ISLAND AND NOT TOFFEEV2}where T is unconstrained;{$ENDIF}
+  {$IFDEF ISLAND AND TOFFEV2}where T is NSObject;{$ENDIF}
+  {$IFDEF TOFFEE} where T is class;{$ENDIF}
   public
     constructor; mapped to constructor();
 
@@ -21,13 +31,19 @@ type
     method MutableVersion: Stack<T>;
   end;
 
-  Stack<T> = public class(ImmutableStack<T>) mapped to PlatformStack<T>
+  IStack<T> = public interface(IImmutableStack<T>)
+    method Clear;
+    method Push(Item: T);
+    method Pop: T;
+  end;
+
+  Stack<T> = public class(ImmutableStack<T>, IStack<T>) mapped to PlatformStack<T>
   public
     constructor; mapped to constructor();
 
     method Clear;
-    method Pop: T;
     method Push(Item: T);
+    method Pop: T;
   end;
 
 implementation
@@ -87,7 +103,7 @@ end;
 method ImmutableStack<T>.MutableVersion: Stack<T>;
 begin
   {$IF NOT TOFFEE}
-  result := self;
+  result := Stack<T>(self);
   {$ELSEIF TOFFEE}
   if self is NSMutableArray then
     result := self as NSMutableArray

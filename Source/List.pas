@@ -11,7 +11,17 @@ type
   PlatformSequence<T> = public sequence of T;
   {$ENDIF}
 
-  ImmutableList<T> = public class (PlatformSequence<T>) mapped to PlatformImmutableList<T>
+  IImmutableList<T> = public interface(PlatformSequence<T>)
+    method Contains(aItem: T): Boolean;
+    method IndexOf(aItem: T): Integer;
+    method LastIndexOf(aItem: T): Integer;
+    property Item[i: Integer]: T read; default;
+    property Count: Integer read;
+  end;
+
+  ImmutableList<T> = public class (PlatformSequence<T>, IImmutableList<T>) mapped to PlatformImmutableList<T>
+  //{$IFDEF ISLAND AND NOT TOFFEV2}where T is unconstrained;{$ENDIF}
+  {$IFDEF ISLAND AND TOFFEV2}where T is NSObject;{$ENDIF}
   {$IFDEF TOFFEE} where T is class;{$ENDIF}
   private
     method GetItem(&Index: Integer): T;
@@ -40,6 +50,11 @@ type
     method GetSequence: sequence of T;
     begin
       exit RemObjects.Elements.System.INSFastEnumeration<T>(mapped).GetSequence();
+    end;
+
+    operator Implicit(aList: ImmutableList<T>): sequence of T;
+    begin
+      result := aList.GetSequence;
     end;
     {$ENDIF}
 
@@ -78,7 +93,19 @@ type
     end;
   end;
 
-  List<T> = public class (ImmutableList<T>) mapped to PlatformList<T>
+  IList<T> = public interface (IImmutableList<T>)
+    method &Add(aItem: T): T;
+    method &Add(params Items: nullable array of T);
+    method &Add(Items: nullable sequence of T);
+
+    method &Remove(aItem: T): Boolean;
+    method &Remove(aItems: sequence of T);
+    method RemoveAll;
+    method RemoveAt(aIndex: Integer);
+    method RemoveRange(aIndex: Integer; aCount: Integer);
+  end;
+
+  List<T> = public class (ImmutableList<T>, IList<T>) mapped to PlatformList<T>
   {$IFDEF TOFFEE}
     where T is class;
   {$ENDIF}
@@ -104,7 +131,7 @@ type
     method &Add(Items: nullable sequence of T); inline;
 
     method &Remove(aItem: T): Boolean; inline;
-    method &Remove(aItems: List<T>); inline;
+    method &Remove(aItems: ImmutableList<T>); inline;
     method &Remove(aItems: sequence of T); inline;
     method RemoveAll; inline;
     method RemoveAt(aIndex: Integer); inline;
@@ -485,7 +512,7 @@ begin
   {$ENDIF}
 end;
 
-method List<T>.Remove(aItems: List<T>);
+method List<T>.Remove(aItems: ImmutableList<T>);
 begin
   {$IF NOT TOFFEE}
   for each i in aItems do
@@ -673,7 +700,7 @@ begin
   {$ELSEIF ISLAND}
   result := coalesce(List<T>(self), new List<T>(self)) as not nullable;
   {$ELSE}
-  result := self;
+  result := List<T>(self);
   {$ENDIF}
 end;
 
@@ -684,7 +711,19 @@ begin
   for each e in self index i do begin
     if (i ≠ 0) and assigned(aSeparator) then
       lResult.Append(aSeparator);
-    lResult.Append(e:ToString());
+      {$IF ISLAND}
+      case modelOf(T) of
+        "Island": lResult.Append((e as IslandObject):ToString());
+        "Cocoa": {$IF DARWIN}lResult.Append((e as CocoaObject):description());{$ENDIF}
+        "Swift": {$IF DARWIN}lResult.Append((e as SwiftObject):ToString());{$ENDIF}
+        "Delphi": raise new Exception($"This feature is not supported for Delphi Objects (yet)");
+        "COM": raise new Exception($"This feature is not supported for COM Objects");
+        "JNI": raise new Exception($"This feature is not supported for JNI Objects");
+        else raise new Exception($"Unexpected object model {modelOf(T)}");
+      end;
+      {$ELSE}
+      lResult.Append(e:ToString());
+      {$ENDIF}
   end;
   result := lResult.ToString() as not nullable;
   {$ELSEIF TOFFEE}

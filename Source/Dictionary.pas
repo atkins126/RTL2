@@ -6,7 +6,19 @@ type
   PlatformImmutableDictionary<T,U> = public {$IF COOPER}java.util.HashMap<T,U>{$ELSEIF TOFFEE}Foundation.NSDictionary<T, U>{$ELSEIF ECHOES}System.Collections.Generic.Dictionary<T,U>{$ELSEIF ISLAND}RemObjects.Elements.System.ImmutableDictionary<T,U>{$ENDIF};
   PlatformDictionary<T,U> = public {$IF COOPER}java.util.HashMap<T,U>{$ELSEIF TOFFEE}Foundation.NSMutableDictionary<T, U>{$ELSEIF ECHOES}System.Collections.Generic.Dictionary<T,U>{$ELSEIF ISLAND}RemObjects.Elements.System.Dictionary<T,U>{$ENDIF};
 
-  ImmutableDictionary<T, U> = public class (PlatformSequence<KeyValuePair<T,U>>) mapped to PlatformImmutableDictionary<T,U> {$IF TOFFEE} where T is class, U is class; {$ENDIF}
+  IImmutableDictionary<T, U> = public interface(PlatformSequence<KeyValuePair<T,U>>)
+    method ContainsKey(Key: not nullable T): Boolean;
+    method ContainsValue(Value: not nullable U): Boolean;
+    property Item[Key: not nullable T]: nullable U read; default; // will return nil for unknown keys
+    property Keys: not nullable ImmutableList<T> read;
+    property Values: not nullable sequence of U read;
+    property Count: Integer read;
+  end;
+
+  ImmutableDictionary<T, U> = public class (IImmutableDictionary<T, U>) mapped to PlatformImmutableDictionary<T,U>
+  {$IFDEF ISLAND AND NOT TOFFEEV2}where T is unconstrained, U is unconstrained;{$ENDIF}
+  {$IFDEF ISLAND AND TOFFEV2}where T is NSObject, U is NSOBject;{$ENDIF}
+  {$IF TOFFEE} where T is class, U is class; {$ENDIF}
   private
     method GetKeys: not nullable ImmutableList<T>;
     method GetValues: not nullable sequence of U;
@@ -36,6 +48,13 @@ type
       exit DictionaryHelpers.GetSequence<T, U>(self);
     end;
 
+    {$IF DARWIN AND NOT TOFFEE}
+    //operator Explicit(aDictionary: NSDictionary<T, U>): ImmutableDictionary<T, U>;
+    //begin
+      //result := aDictionary as PlatformImmutableDictionary<T,U> as ImmutableDictionary<T, U>;
+    //end;
+    {$ENDIF}
+
     //[&Sequence]
     //method GetSequence: sequence of tuple of (String, JsonNode); iterator;
     //begin
@@ -43,6 +62,13 @@ type
         //yield (kv.Key, kv.Value);
     //end;
 
+  end;
+
+  IDictionary<T, U> = public interface(IImmutableDictionary<T, U>)
+    method &Add(Key: not nullable T; Value: nullable U);
+    method &Remove(Key: not nullable T): Boolean;
+    method RemoveAll;
+    property Item[aKey: not nullable T]: nullable U read write; default; // will return nil for unknown keys
   end;
 
   Dictionary<T, U> = public class(ImmutableDictionary<T, U>) mapped to PlatformDictionary<T,U>
@@ -186,7 +212,7 @@ begin
   {$IF COOPER}
   exit mapped.values as not nullable;
   {$ELSEIF TOFFEE}
-  exit mapped.allValues as not nullable;
+  exit mapped.allValues as ImmutableList<U> as not nullable;
   {$ELSEIF ECHOES OR ISLAND}
   exit mapped.Values as not nullable;
   {$ENDIF}
@@ -247,7 +273,7 @@ begin
   {$ELSEIF ISLAND}
   result := coalesce(Dictionary<T,U>(self), new PlatformDictionary<T,U>(self)) as not nullable;
   {$ELSE}
-  result := self;
+  result := not nullable Dictionary<T, U>(self);
   {$ENDIF}
 end;
 

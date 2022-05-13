@@ -24,6 +24,17 @@ type
 
   ISO8601Format = public enum(Standard, DateOnly, StandardWithTimeZone, Full) of Integer;
 
+  [assembly:DefaultTypeOverride("DateTime", "RemObjects.Elements.RTL", typeOf(RemObjects.Elements.RTL.DateTime))]
+  {$IFDEF ISLAND AND NOT TOFFEE}
+  DateTime = public partial class(IComparable)
+  public
+    method CompareTo(other: Object): Integer;
+    begin
+      exit fDateTime.CompareTo(DateTime(other).fDateTime);
+    end;
+  end;
+  {$ENDIF}
+
   DateTime = public partial class {$IF COOPER OR TOFFEE} mapped to PlatformDateTime{$ENDIF}
   private
     {$IF ECHOES OR (ISLAND AND NOT TOFFEE)}
@@ -309,7 +320,7 @@ begin
   else
     result := lDateInTimeZone.ToString(DateFormatter.Format(Format), new System.Globalization.CultureInfo(Culture));
   {$ELSEIF ISLAND}
-  result := fDateTime.ToString; {$HINT incomplete, as it does not use Format, Culture or TimeZone yet}
+  result := fDateTime.ToString(Format, Culture, aTimeZone);
   {$ENDIF}
 end;
 
@@ -321,7 +332,7 @@ end;
 method DateTime.ToISO8601String(aFormat: ISO8601Format := ISO8601Format.Standard; aTimeZone: TimeZone := nil): String;
 begin
   var lFormat: String;
-  {$IF COOPER OR TOFFEE}
+  {$IF COOPER OR TOFFEE OR DARWIN}
   case aFormat of
     ISO8601Format.Standard: lFormat := "yyyy-MM-dd'T'HH:mm:ss";
     ISO8601Format.DateOnly: lFormat := 'yyyy-MM-dd';
@@ -354,9 +365,7 @@ begin
   lFormatter.dateStyle := NSDateFormatterStyle.ShortStyle;
   lFormatter.timeStyle := NSDateFormatterStyle.NoStyle;
   result := lFormatter.stringFromDate(mapped);
-  {$ELSEIF ISLAND}
-  {$HINT NEEDS ISLAND}//result := fDateTime.ToShortDateString;
-  {$ELSEIF ECHOES}
+  {$ELSEIF ECHOES OR ISLAND }
   result := fDateTime.ToShortDateString;
   {$ENDIF}
 end;
@@ -373,10 +382,8 @@ begin
   lFormatter.dateStyle := NSDateFormatterStyle.NoStyle;
   lFormatter.timeStyle := NSDateFormatterStyle.ShortStyle;
   result := lFormatter.stringFromDate(mapped);
-  {$ELSEIF ECHOES}
+  {$ELSEIF ECHOES OR ISLAND}
   result := fDateTime.ToShortTimeString();
-  {$ELSEIF ISLAND}
-  {$HINT NEEDS ISLAND}//result := fDateTime.ToShortTimeString;
   {$ENDIF}
 end;
 
@@ -400,7 +407,7 @@ begin
   {$ELSEIF ECHOES}
   result := ToShortDateString();
   {$ELSEIF ISLAND}
-  result := ToShortPrettyDateString();
+  result := fDateTime.ToShortPrettyDateString();
   {$ENDIF}
 end;
 
@@ -417,9 +424,9 @@ begin
   lFormatter.timeStyle := NSDateFormatterStyle.NoStyle;
   result := lFormatter.stringFromDate(mapped);
   {$ELSEIF ECHOES}
-  result := fDateTime.ToShortDateString;
+  result := fDateTime.ToLongDateString;
   {$ELSEIF ISLAND}
-  result := ToShortPrettyDateString();{$HINT NEEDS ISLAND}//result := fDateTime.ToLongPrettyDateString();
+  result := fDateTime.ToLongPrettyDateString();
   {$ENDIF}
 end;
 

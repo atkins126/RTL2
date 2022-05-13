@@ -9,11 +9,29 @@ type
     method GetLastPathComponentWithSeparatorChars(aPath:String; aSeparators: array of Char): not nullable String;
 
   public
-    method ChangeExtension(aFileName: not nullable String; NewExtension: nullable String): not nullable String;
+    method ChangeExtension(aFileName: not nullable String; aNewExtension: nullable String): not nullable String;
 
     method Combine(aBasePath: nullable String; params aPaths: array of String): nullable String;
     method CombineUnixPath(aBasePath: not nullable String; params aPaths: array of String): not nullable String;
     method CombineWindowsPath(aBasePath: not nullable String; params aPaths: array of String): not nullable String;
+
+    {$IF NOT WEBASSEMBLY}
+    method FirstMatchingSubfolder(aFolder: String; aSubFolderOptions: sequence of String): nullable String;
+    begin
+      for each f in aSubFolderOptions do
+        if Path.Combine(aFolder, f).FolderExists then
+          exit Path.Combine(aFolder, f);
+    end;
+
+    method FirstMatchingSubfolder(aFolder: String; aSubFolderOptions: sequence of String; aBuildPath: block(aFolder, aSubFolder: String): String): nullable String;
+    begin
+      for each f in aSubFolderOptions do begin
+        var p := aBuildPath(aFolder, f);
+        if p:FolderExists then
+          exit p;
+      end;
+    end;
+    {$ENDIF}
 
     method GetParentDirectory(aFileName: not nullable String) FolderSeparator(aFolderSeparator: Char): nullable String;
     method GetParentDirectory(aFileName: not nullable String) FolderSeparators(aFolderSeparators: array of Char): nullable String; private;
@@ -50,20 +68,23 @@ type
 
 implementation
 
-method Path.ChangeExtension(aFileName: not nullable String; NewExtension: nullable String): not nullable String;
+method Path.ChangeExtension(aFileName: not nullable String; aNewExtension: nullable String): not nullable String;
 begin
-  var lIndex := aFileName.LastIndexOf(".");
+  if (length(aNewExtension) > 0) and (aNewExtension[0] ≠ '.') then
+    aNewExtension := "."+aNewExtension
+  else if aNewExtension = "." then
+    aNewExtension := nil;
 
-  if lIndex <> -1 then
+  var lIndex := aFileName.LastIndexOf(".");
+  var lFolderIndex := aFileName.LastIndexOfAny(['/','\']);
+
+  if (lIndex > -1) and (lFolderIndex ≤ lIndex) then
     aFileName := aFileName.Substring(0, lIndex);
 
-  if length(NewExtension) = 0 then
-    exit aFileName;
-
-  if NewExtension[0] = '.' then
-    result := aFileName + NewExtension
+  if length(aNewExtension) > 0 then
+    result := aFileName+aNewExtension as not nullable
   else
-    result := aFileName + "." + NewExtension as not nullable;
+    result := aFileName;
 end;
 
 method Path.Combine(aBasePath: nullable String; params aPaths: array of String): nullable String;

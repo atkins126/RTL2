@@ -19,8 +19,10 @@ type
   {$ELSEIF ISLAND}
   PlatformType = public RemObjects.Elements.System.Type;
   {$ENDIF}
-
+  {$IFNDEF TOFFEEV2}
   Visibility = public enum(&Private, &Unit, UnitAndProtected, UnitOrProtected, &Assembly, AssemblyAndProtected, AssemblyOrProtected, &Protected, &Public, &Published);
+
+  [assembly:DefaultTypeOverride("Type", "RemObjects.Elements.RTL.Reflection", typeOf(RemObjects.Elements.RTL.Reflection.Type))]
 
   &Type = public class {$IF NOT TOFFEE OR ISLAND} mapped to PlatformType {$ENDIF}
   private
@@ -47,6 +49,7 @@ type
     class method GetType(aName: not nullable String): nullable &Type;
     constructor withPlatformType(aType: PlatformType);
     {$IF COOPER}
+    //method IsSubclassOf(aType: &Type): Boolean;
     property Interfaces: ImmutableList<&Type> read mapped.getInterfaces().ToList() as ImmutableList<&Type>;
     property Methods: ImmutableList<&Method> read mapped.getMethods().ToList();
     property MethodFields: ImmutableList<Field> read mapped.getFields().ToList();
@@ -91,10 +94,11 @@ type
     property IsEnum: Boolean read mapped.GetTypeInfo().IsEnum;
     property IsValueType: Boolean read mapped.GetTypeInfo().IsValueType;
     {$ELSEIF ECHOES}
+    method IsSubclassOf(aType: &Type): Boolean;
     property Interfaces: ImmutableList<&Type> read mapped.GetInterfaces().ToList();
     property Methods: ImmutableList<&Method> read mapped.GetMethods().ToList();
     property Properties: ImmutableList<&Property> read mapped.GetProperties().ToList();
-    property Fields: ImmutableList<Field> read mapped.GetFields().ToList();
+    property Fields: ImmutableList<Field> read mapped.GetFields(System.Reflection.BindingFlags.Public or System.Reflection.BindingFlags.NonPublic or System.Reflection.BindingFlags.Instance or System.Reflection.BindingFlags.Static).ToList();
     //property Attributes: ImmutableList<Sugar.Reflection.AttributeInfo> read mapped.().ToList();
     property Name: String read mapped.Name;
     property BaseType: nullable &Type read mapped.BaseType;
@@ -104,6 +108,7 @@ type
     property IsEnum: Boolean read mapped.IsEnum;
     property IsValueType: Boolean read mapped.IsValueType;
     {$ELSEIF ISLAND}
+    method IsSubclassOf(aType: &Type): Boolean;
     property Interfaces: ImmutableList<&Type> read sequence of &Type(mapped.Interfaces).ToList();
     property Methods: ImmutableList<&Method> read sequence of &Method(mapped.Methods).ToList();
     property Properties: ImmutableList<&Property> read sequence of &Property(mapped.Properties).ToList();
@@ -133,9 +138,10 @@ type
       {$ENDIF}
     end;
   end;
+  {$ENDIF}
 
 implementation
-
+{$IFNDEF TOFFEEV2}
 {$IF COOPER}[Warning("Type.GetAllTypes is not supported for Java")]{$ENDIF}
 class method &Type.GetAllTypes: ImmutableList<&Type>;
 begin
@@ -189,6 +195,10 @@ begin
 end;
 
 {$IF COOPER}
+//method &Type.IsSubclassOf(aType: &Type): Boolean;
+//begin
+  //result := mapped.IsSubclassOf(aType);
+//end;
 {$ELSEIF TOFFEE AND NOT ISLAND}
 constructor &Type withID;
 begin
@@ -297,6 +307,17 @@ method &Type.IsSubclassOf(aType: &Type): Boolean;
 begin
   result := fClass.isSubclassOfClass(aType.fClass);
 end;
+{$ELSEIF NETFX_CORE}
+{$ELSEIF ECHOES}
+method &Type.IsSubclassOf(aType: &Type): Boolean;
+begin
+  result := mapped.IsSubclassOf(aType);
+end;
+{$ELSEIF ISLAND}
+method &Type.IsSubclassOf(aType: &Type): Boolean;
+begin
+  result := mapped.IsSubclassOf(aType);
+end;
 {$ENDIF}
 
 {$IF NETFX_CORE}
@@ -309,5 +330,8 @@ method &Type.Get_Methods: ImmutableList<&Method>;
 begin
   exit System.Linq.Enumerable.ToArray(System.Linq.Enumerable.OfType<&Method>(mapped.GetTypeInfo().DeclaredMembers));
 end;
+{$ENDIF}
+
+
 {$ENDIF}
 end.

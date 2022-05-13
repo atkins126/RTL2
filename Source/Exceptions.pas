@@ -175,19 +175,20 @@ type
 
   IOException = public class(RTLException);
 
-  {$IF NOT WEBASSEMBLY}
   HttpException = public class(RTLException)
   assembly
 
-    constructor(aMessage: String; aResponse: nullable HttpResponse := nil);
+    constructor(aMessage: String; aRequest: nullable HttpRequest /*:= nil*/; aResponse: nullable HttpResponse := nil);
     begin
       inherited constructor(aMessage);
+      Request := aRequest;
       Response := aResponse;
     end;
 
-    constructor(aCode: Integer);
+    constructor(aCode: Integer; aRequest: nullable HttpRequest/* := nil*/);
     begin
       inherited constructor(String.Format("Unable to complete request, error code: {0}", aCode));
+      Request := aRequest;
       fCode := aCode;
     end;
 
@@ -195,10 +196,10 @@ type
     fCode: nullable Integer;
 
   public
+    property Request: nullable HttpRequest; readonly;
     property Response: nullable HttpResponse; readonly;
     property Code: Integer read coalesce(Response:Code, fCode);
   end;
-  {$ENDIF}
 
   FileNotFoundException = public class (RTLException)
   public

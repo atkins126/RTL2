@@ -1,7 +1,7 @@
 ﻿namespace RemObjects.Elements.RTL;
 
 type
-  ISequence_Extensions<T> = public extension class (ISequence<T>)
+  ISequence_Extensions<T> = public extension class(ISequence<T>)
   public
     //method ToList<U>: not nullable ImmutableList<U>; {$IF TOFFEE}where U is class;{$ENDIF}
     //begin
@@ -10,10 +10,7 @@ type
 
     method ToSortedList(aComparison: Comparison<T>): ImmutableList<T>;
     begin
-      if self is ImmutableList<T> then
-        result := (self as ImmutableList<T>).ToSortedList(aComparison)
-      else
-        result := self.ToList().ToSortedList(aComparison)
+      result := self.ToList().ToSortedList(aComparison)
     end;
 
     method JoinedString(aSeparator: nullable String := nil): not nullable String;
